@@ -1,0 +1,135 @@
+# Hardcoded Order Pick Data (15th Oct sheet)
+# Represents execution / dispatch reality
+
+ORDER_PICK_DATA = [
+    {
+        "order_no": "ORD001",
+        "order_pick_date": "2023-10-15",
+        "order_pick_time": "08:30:00",
+        "customer_code": "CUST001",
+        "pincode": "400001",
+        "sku": "SKU001",
+        "sku_class": "A",
+        "qty": 5,
+        "hub_pincode": "400002",
+        "delivery_period": 3,
+        "delivery_date": "2023-10-18"
+    },
+    {
+        "order_no": "ORD002",
+        "order_pick_date": "2023-10-15",
+        "order_pick_time": "09:45:00",
+        "customer_code": "CUST002",
+        "pincode": "110001",
+        "sku": "SKU003",
+        "sku_class": "A",
+        "qty": 8,
+        "hub_pincode": "110003",
+        "delivery_period": 2,
+        "delivery_date": "2023-10-17"
+    },
+    {
+        "order_no": "ORD003",
+        "order_pick_date": "2023-10-15",
+        "order_pick_time": "10:15:00",
+        "customer_code": "CUST003",
+        "pincode": "560001",
+        "sku": "SKU001",
+        "sku_class": "A",
+        "qty": 2,
+        "hub_pincode": "560002",
+        "delivery_period": 4,
+        "delivery_date": "2023-10-19"
+    },
+    {
+        "order_no": "ORD004",
+        "order_pick_date": "2023-10-15",
+        "order_pick_time": "11:30:00",
+        "customer_code": "CUST004",
+        "pincode": "600001",
+        "sku": "SKU004",
+        "sku_class": "C",
+        "qty": 6,
+        "hub_pincode": "600003",
+        "delivery_period": 5,
+        "delivery_date": "2023-10-20"
+    },
+    {
+        "order_no": "ORD005",
+        "order_pick_date": "2023-10-15",
+        "order_pick_time": "13:20:00",
+        "customer_code": "CUST005",
+        "pincode": "500001",
+        "sku": "SKU002",
+        "sku_class": "B",
+        "qty": 4,
+        "hub_pincode": "500002",
+        "delivery_period": 3,
+        "delivery_date": "2023-10-18"
+    },
+    {
+        "order_no": "ORD006",
+        "order_pick_date": "2023-10-15",
+        "order_pick_time": "14:15:00",
+        "customer_code": "CUST006",
+        "pincode": "700001",
+        "sku": "SKU003",
+        "sku_class": "A",
+        "qty": 7,
+        "hub_pincode": "700002",
+        "delivery_period": 4,
+        "delivery_date": "2023-10-19"
+    },
+    {
+        "order_no": "ORD007",
+        "order_pick_date": "2023-10-15",
+        "order_pick_time": "15:45:00",
+        "customer_code": "CUST007",
+        "pincode": "380001",
+        "sku": "SKU001",
+        "sku_class": "A",
+        "qty": 3,
+        "hub_pincode": "380003",
+        "delivery_period": 2,
+        "delivery_date": "2023-10-17"
+    },
+    {
+        "order_no": "ORD008",
+        "order_pick_date": "2023-10-15",
+        "order_pick_time": "16:30:00",
+        "customer_code": "CUST008",
+        "pincode": "411001",
+        "sku": "SKU004",
+        "sku_class": "C",
+        "qty": 5,
+        "hub_pincode": "411002",
+        "delivery_period": 3,
+        "delivery_date": "2023-10-18"
+    },
+    {
+        "order_no": "ORD009",
+        "order_pick_date": "2023-10-15",
+        "order_pick_time": "17:00:00",
+        "customer_code": "CUST009",
+        "pincode": "302001",
+        "sku": "SKU002",
+        "sku_class": "B",
+        "qty": 9,
+        "hub_pincode": "302003",
+        "delivery_period": 5,
+        "delivery_date": "2023-10-20"
+    },
+    {
+        "order_no": "ORD010",
+        "order_pick_date": "2023-10-15",
+        "order_pick_time": "17:30:00",
+        "customer_code": "CUST010",
+        "pincode": "800001",
+        "sku": "SKU003",
+        "sku_class": "A",
+        "qty": 2,
+        "hub_pincode": "800002",
+        "delivery_period": 3,
+        "delivery_date": "2023-10-18"
+    }
+]

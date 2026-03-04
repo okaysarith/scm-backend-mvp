@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+pydantic
+azure-identity
+azure-digitaltwins-core
+python-dotenv
+pydantic-settings
+
