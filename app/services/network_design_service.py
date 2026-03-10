@@ -1480,3 +1480,36 @@ def get_network_design_service():
         print("=== GLOBAL NETWORK DESIGN SERVICE INSTANCE CREATED ===")
     return network_design_service
 
+def get_combined_df_data(data_source: str):
+    """Smart data source selection algorithm"""
+    from pathlib import Path
+    import os
+    
+    DATA_DIR = Path("data")
+    BASELINE_FILE = DATA_DIR / "combined_df.csv"
+    
+    if data_source == "existing":
+        # Download from Azure if needed
+        if not BASELINE_FILE.exists():
+            from app.main import ensure_baseline_downloaded
+            success = ensure_baseline_downloaded()
+            if not success:
+                raise Exception("Failed to download baseline data")
+        
+        return pd.read_csv(BASELINE_FILE)
+    
+    elif data_source == "uploaded":
+        # Check user file
+        if not BASELINE_FILE.exists():
+            raise FileNotFoundError("No uploaded file found")
+        
+        # Validate size
+        file_size = BASELINE_FILE.stat().st_size
+        if file_size > 30 * 1024 * 1024:  # 30MB
+            raise ValueError("File exceeds 30MB limit")
+        
+        return pd.read_csv(BASELINE_FILE)
+    
+    else:
+        raise ValueError("data_source must be 'existing' or 'uploaded'")
+

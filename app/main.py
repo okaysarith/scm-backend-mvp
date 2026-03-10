@@ -48,6 +48,7 @@ def ensure_baseline_downloaded():
     from pathlib import Path
     import requests
     import os
+    import time
     
     DATA_DIR = Path("data")
     BASELINE_PATH = DATA_DIR / "combined_df.csv"
@@ -61,13 +62,37 @@ def ensure_baseline_downloaded():
         "https://scmdata2026.blob.core.windows.net/data/combined_df.csv",
     )
     logger.info(f"Downloading baseline data from {url}")
-    resp = requests.get(url, stream=True, timeout=180)
-    resp.raise_for_status()
-    with open(BASELINE_PATH, "wb") as f:
-        for chunk in resp.iter_content(chunk_size=8192):
-            if chunk:
-                f.write(chunk)
-    logger.info(f"Baseline data downloaded to {BASELINE_PATH}")
+    
+    try:
+        response = requests.get(url, stream=True, timeout=25)
+        response.raise_for_status()
+        total_size = int(response.headers.get('content-length', 0))
+        
+        downloaded = 0
+        start_time = time.time()
+        
+        with open(BASELINE_PATH, "wb") as f:
+            for chunk in response.iter_content(chunk_size=65536):  # 64KB chunks
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    
+                    # Progress check
+                    if time.time() - start_time > 20:  # 5s buffer
+                        logger.info(f"Downloaded {downloaded}/{total_size} bytes")
+                        if downloaded < total_size * 0.1:  # At least 10% progress
+                            continue  # Continue if making progress
+                        else:
+                            logger.warning("Download too slow, will use fallback")
+                            return False
+        
+        success = downloaded >= total_size * 0.95  # 95% complete
+        logger.info(f"Baseline download {'successful' if success else 'partial'}: {downloaded} bytes")
+        return success
+        
+    except Exception as e:
+        logger.error(f"Baseline download failed: {e}")
+        return False
 
 # Import routers
 from app.api.routes_network_design import router as network_design_router
@@ -154,17 +179,35 @@ app = FastAPI(
 # ============================================================================
 # CORS Middleware
 # ============================================================================
-origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
-if os.getenv("ENVIRONMENT") == "production":
-    production_origins = os.getenv("CORS_ORIGINS", "").split(",")
-    if production_origins and production_origins[0]:
-        origins.extend(production_origins)
+def normalize_origins():
+    """Normalize CORS origins based on environment"""
+    origins = []
+    
+    # Add localhost for development only
+    if os.getenv("ENVIRONMENT") != "production":
+        origins.extend(["http://localhost:3000", "http://127.0.0.1:3000"])
+    
+    # Add frontend URL from environment
+    frontend_url = os.getenv("FRONTEND_URL")
+    if frontend_url:
+        origins.append(frontend_url.strip())
+    
+    # Add additional production origins
+    cors_origins = os.getenv("CORS_ORIGINS", "")
+    if cors_origins:
+        origins.extend([origin.strip() for origin in cors_origins.split(",") if origin.strip()])
+    
+    # Remove duplicates and filter empty
+    return list(set(filter(None, origins)))
+
+# Use normalized origins
+origins = normalize_origins()
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_credentials=False,  # Stricter policy
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 

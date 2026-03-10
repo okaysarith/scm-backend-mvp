@@ -9,6 +9,8 @@ import shutil
 import re
 import sys
 import os
+import numpy as np
+import math
 
 import logging
 
@@ -51,6 +53,17 @@ def find_nearest_hub(request: NearestHubRequest):
     except Exception as e:
         logger.error(f"Error finding nearest hub for {request.pincode}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+def dataframe_to_json_safe(df):
+    """Convert DataFrame to JSON-safe format"""
+    if isinstance(df, pd.DataFrame):
+        df_clean = df.copy()
+        # Replace inf/nan with None or safe values
+        df_clean.replace([np.inf, -np.inf, np.nan], None, inplace=True)
+        # Convert any remaining problematic values
+        for col in df_clean.select_dtypes(include=[np.number]):
+            df_clean[col] = df_clean[col].apply(lambda x: None if (math.isnan(x) if hasattr(x, 'isnan') else False) or (math.isinf(x) if hasattr(x, 'isinf') else False) else x)
+    return df_clean
 
 @router.post("/network-coverage", response_model=NetworkCoverageResponse)
 def analyze_network_coverage(request: NetworkCoverageRequest):
@@ -445,11 +458,36 @@ class RiskAnalysisResponse(BaseModel):
     delivery_risk_analysis: Dict[str, Dict[str, Any]]
     error: Optional[str] = None
 
+# User Upload Combined CSV Endpoint
+@router.post("/upload-combined-df")
+async def upload_combined_df(file: UploadFile = File(...)):
+    """Allow user to upload their own combined_df.csv"""
+    try:
+        # Validate file type
+        if not file.filename.endswith('.csv'):
+            raise HTTPException(status_code=400, detail="Only CSV files allowed")
+        
+        # Read content to validate size
+        content = await file.read()
+        if len(content) > 30 * 1024 * 1024:  # 30MB
+            raise HTTPException(status_code=413, detail="File size exceeds 30MB limit")
+        
+        # Save to data directory
+        from app.services.network_design_service import DATA_DIR
+        file_path = DATA_DIR / "combined_df.csv"
+        with open(file_path, "wb") as f:
+            f.write(content)
+        
+        return {"message": "File uploaded successfully", "path": str(file_path)}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
 # Comprehensive Baseline Network Endpoint
 @router.post("/comprehensive-baseline")
 async def generate_comprehensive_baseline_network(
     background_tasks: BackgroundTasks,
-    data_source: str = Form("preloaded"),
+    data_source: str = Form("existing"),
     order_file: Optional[UploadFile] = File(None),
     pick_file: Optional[UploadFile] = File(None),
     limit: int = Form(10000),
@@ -469,25 +507,45 @@ async def generate_comprehensive_baseline_network(
         
         # Normalize and validate data_source
         data_source = data_source.lower().strip()
-        if data_source not in ["preloaded", "custom"]:
+        if data_source not in ["existing", "uploaded", "custom"]:
             raise HTTPException(
                 status_code=400,
-                detail="data_source must be 'preloaded' or 'custom'"
+                detail="data_source must be 'existing', 'uploaded', or 'custom'"
             )
         
-        if data_source == "preloaded":
-            # Use existing preloaded data
-            baseline_df = get_network_design_service().generate_comprehensive_baseline_network(limit=limit)
+        if data_source == "existing":
+            # Use smart algorithm for existing data
+            from app.services.network_design_service import get_combined_df_data
+            baseline_df = get_combined_df_data("existing")
+            # Apply existing calculations
+            baseline_df = baseline_df.head(limit)
             processing_time = f"{time.time() - start_time:.2f}s"
             
             return {
-                "status": "success",
-                "data_source": "preloaded",
-                "records_processed": len(baseline_df) if not baseline_df.empty else 0,
-                "baseline_network": baseline_df.to_dict('records') if not baseline_df.empty else [],
-                "compliance_metrics": {},
-                "processing_time": processing_time
-            }
+                    "status": "success",
+                    "data_source": "existing",
+                    "records_processed": len(baseline_df) if not baseline_df.empty else 0,
+                    "baseline_network": dataframe_to_json_safe(baseline_df) if not baseline_df.empty else [],
+                    "compliance_metrics": {},
+                    "processing_time": processing_time
+                }
+                
+        elif data_source == "uploaded":
+            # Use smart algorithm for uploaded data
+            from app.services.network_design_service import get_combined_df_data
+            baseline_df = get_combined_df_data("uploaded")
+            # Apply existing calculations
+            baseline_df = baseline_df.head(limit)
+            processing_time = f"{time.time() - start_time:.2f}s"
+            
+            return {
+                    "status": "success",
+                    "data_source": "uploaded",
+                    "records_processed": len(baseline_df) if not baseline_df.empty else 0,
+                    "baseline_network": dataframe_to_json_safe(baseline_df) if not baseline_df.empty else [],
+                    "compliance_metrics": {},
+                    "processing_time": processing_time
+                }
             
         elif data_source == "custom":
             # Validate uploaded files
@@ -546,7 +604,7 @@ async def generate_comprehensive_baseline_network(
                     "status": "success",
                     "data_source": "custom",
                     "records_processed": len(baseline_df) if not baseline_df.empty else 0,
-                    "baseline_network": baseline_df.to_dict('records') if not baseline_df.empty else [],
+                    "baseline_network": dataframe_to_json_safe(baseline_df) if not baseline_df.empty else [],
                     "compliance_metrics": metrics or {},
                     "processing_time": processing_time
                 }
