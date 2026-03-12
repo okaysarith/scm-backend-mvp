@@ -9,3 +9,5 @@ gunicorn==21.2.0
 requests==2.31.0
 scikit-learn==1.8.0
 joblib==1.5.3
+aiohttp>=3.8.0
+aiofiles>=0.8.0
