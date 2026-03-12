@@ -212,6 +212,20 @@ app.add_middleware(
 )
 
 # ============================================================================
+# Exception Handlers
+# ============================================================================
+from fastapi.responses import JSONResponse
+from app.validators.network_validators import NetworkValidationError
+
+@app.exception_handler(NetworkValidationError)
+async def validation_exception_handler(request, exc):
+    """Handle validation errors with proper HTTP status codes"""
+    return JSONResponse(
+        status_code=400,
+        content={"status": "error", "error": {"code": "VALIDATION_ERROR", "message": str(exc)}}
+    )
+
+# ============================================================================
 # Include Routers
 # ============================================================================
 

@@ -11,9 +11,11 @@ import sys
 import os
 import numpy as np
 import math
+import uuid
 
 import logging
 
+from app.validators.network_validators import NetworkValidationError, validate_data_source, validate_pincode, validate_limit
 from app.services.network_design_service import get_network_design_service
 from app.models.network_models import (
     NearestHubRequest,
@@ -43,16 +45,21 @@ def find_nearest_hub(request: NearestHubRequest):
     - Returns the nearest hub with distance information
     """
     try:
-        result = get_network_design_service().find_nearest_hub(request.pincode)
+        # Validation happens before try block
+        pincode = validate_pincode(request.pincode)
+        
+        result = get_network_design_service().find_nearest_hub(pincode)
         
         if "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
         
         return NearestHubResponse(**result)
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error finding nearest hub for {request.pincode}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 def dataframe_to_json_safe(df):
     """Convert DataFrame to JSON-safe format"""
@@ -190,7 +197,7 @@ def analyze_dispatch_data(request: DispatchAnalysisRequest):
 @router.get("/network-status")
 def get_network_status():
     """
-    Get current network design service status.
+    Get current network design service status with real dependency checks.
     
     Returns information about:
     - Available hubs
@@ -198,6 +205,12 @@ def get_network_status():
     - Service health
     """
     try:
+        from app.services.network_design_service import DATA_DIR
+        
+        # Check actual dependencies
+        master_file = DATA_DIR / "Master_data_with_pincodes.csv"
+        baseline_file = DATA_DIR / "combined_df.csv"
+        
         # Get hub information
         hubs_info = {}
         if get_network_design_service().hubs_df is not None:
@@ -207,17 +220,29 @@ def get_network_status():
                 "pincode_mapping_size": len(get_network_design_service().pincode_hub_mapping)
             }
         
-        # Check data availability using existing flags (no file loading)
-        data_status = {
-            "order_data_available": get_network_design_service().csv_data_loaded,
-            "return_data_available": False,  # No return data loaded in current implementation
-            "master_data_available": get_network_design_service()._pincode_mapping_loaded
+        # Real dependency checks
+        dependencies = {
+            "master_data": master_file.exists(),
+            "baseline_data": baseline_file.exists(),
+            "data_directory": DATA_DIR.exists(),
+            "pincode_mapping_loaded": get_network_design_service()._pincode_mapping_loaded
         }
         
+        # Determine overall status
+        if master_file.exists() and baseline_file.exists():
+            overall_status = "healthy"
+        elif master_file.exists():
+            overall_status = "degraded"
+        else:
+            overall_status = "error"
+        
         return {
-            "status": "healthy",
+            "status": overall_status,
+            "dependencies": dependencies,
             "hubs_info": hubs_info,
-            "data_status": data_status,
+            "performance": {
+                "data_source_available": "existing" if baseline_file.exists() else "upload_required"
+            },
             "services": {
                 "network_design": "active",
                 "csv_processing": "active",
@@ -225,9 +250,19 @@ def get_network_status():
             }
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting network status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return {
+            "status": "error",
+            "error": {"message": "Internal server error"},
+            "services": {
+                "network_design": "error",
+                "csv_processing": "error",
+                "dispatch_analysis": "error"
+            }
+        }
 
 def _generate_dispatch_analysis(orders_df: pd.DataFrame) -> Dict[str, Any]:
     """Generate dispatch analysis from order data"""
@@ -505,13 +540,8 @@ async def generate_comprehensive_baseline_network(
         import time
         start_time = time.time()
         
-        # Normalize and validate data_source
-        data_source = data_source.lower().strip()
-        if data_source not in ["existing", "uploaded", "custom"]:
-            raise HTTPException(
-                status_code=400,
-                detail="data_source must be 'existing', 'uploaded', or 'custom'"
-            )
+        # Validation happens before try block
+        data_source = validate_data_source(data_source)
         
         if data_source == "existing":
             # Use smart algorithm for existing data
@@ -1019,7 +1049,8 @@ async def merge_csv_files(
             merged_df.to_csv(output_path, index=False)
             
             # Also save to main data directory for use by other endpoints
-            main_data_dir = Path("D:/Digital twin/Project Main/Web App/backend/data")
+            from app.services.network_design_service import DATA_DIR
+            main_data_dir = DATA_DIR
             main_output_path = main_data_dir / output_filename
             main_data_dir.mkdir(parents=True, exist_ok=True)
             merged_df.to_csv(main_output_path, index=False)
@@ -1036,7 +1067,8 @@ async def merge_csv_files(
                 headers={
                     "Content-Disposition": f"attachment; filename={output_filename}",
                     "X-Merge-Stats": f"orders={len(orders_df)},picks={len(picks_df)},merged={len(merged_df)}"
-                }
+                },
+                background=BackgroundTask(cleanup_temp_dir, temp_dir)
             )
             
         except ValueError as e:
@@ -1049,12 +1081,15 @@ async def merge_csv_files(
     except Exception as e:
         logger.error(f"Error merging CSV files: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        try:
-            if temp_dir is not None and temp_dir.exists():
-                shutil.rmtree(temp_dir, ignore_errors=True)
-        except Exception:
-            pass
+
+def cleanup_temp_dir(temp_dir: Path):
+    """Background task to cleanup temp directory after response is sent"""
+    try:
+        if temp_dir is not None and temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            logger.info(f"Cleaned up temp directory: {temp_dir}")
+    except Exception as e:
+        logger.error(f"Error cleaning up temp directory: {e}")
 
 @router.get("/merge-preview/{filename}", response_model=MergeCSVResponse)
 async def get_merge_preview(filename: str):
@@ -1068,7 +1103,8 @@ async def get_merge_preview(filename: str):
     """
     try:
         # Check if file exists in data directory
-        main_data_dir = Path("D:/Digital twin/Project Main/Web App/backend/data")
+        from app.services.network_design_service import DATA_DIR
+        main_data_dir = DATA_DIR
         file_path = main_data_dir / filename
         
         if not file_path.exists():
