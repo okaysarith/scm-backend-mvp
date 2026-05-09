@@ -78,6 +78,58 @@ Files are only downloaded if they don't exist locally, ensuring fast subsequent 
 - `GET /` - API root with service info
 - `GET /health` - Health check endpoint
 
+## Deployed Swagger Verification
+
+Use `https://scm-backend-mvp.onrender.com/docs` as the source of truth for the live Render deployment.
+
+### What should appear in Swagger
+- `GET /`
+- `GET /health`
+- `POST /api/network/nearest-hub`
+- `POST /api/network/network-coverage`
+- `POST /api/network/network-optimization`
+- `POST /api/network/dispatch-analysis`
+- `GET /api/network/network-status`
+- `POST /api/network/dispatch-compliance`
+- `POST /api/network/order-risk`
+- `POST /api/network/upload-combined-df`
+- `POST /api/network/comprehensive-baseline`
+- `POST /api/network/comprehensive-compliance`
+- `POST /api/network/risk-analysis`
+- `POST /api/network/upload-csv`
+- `POST /api/network/merge-csv`
+- `GET /api/network/merge-preview/{filename}`
+
+### Recommended manual test order
+1. Open `/docs` and confirm the `network-design` tag is present.
+2. Run `GET /health` first. It should return `{"status": "healthy"}`.
+3. Run `GET /` next. It should return service metadata plus the documented endpoint list.
+4. Test the simple POST routes before the file-upload routes.
+5. Finish with `upload-csv`, `merge-csv`, and `merge-preview/{filename}` because those depend on multipart form data or previously saved files.
+
+### Swagger request examples
+- `POST /api/network/nearest-hub`
+   - JSON body: `{"pincode": "110001"}`
+- `POST /api/network/network-coverage`
+   - JSON body: `{"pincodes": ["110001", "560001"]}`
+- `POST /api/network/order-risk`
+   - JSON body: `{"order_no": "ORD001", "sku": "SKU123", "customer_pincode": "110001", "delivery_period": 2}`
+- `POST /api/network/comprehensive-baseline`
+   - Try `data_source=existing` first
+   - Optional form fields: `limit=1000`, `data_source=custom`
+- `POST /api/network/comprehensive-compliance`
+   - JSON body: `{"cost_per_km": 2.5}`
+- `POST /api/network/upload-csv`
+   - Multipart form fields: `order_data`, `pick_data`
+- `POST /api/network/merge-csv`
+   - Multipart form fields: `order_data`, `pick_data`, optional `output_filename`
+- `GET /api/network/merge-preview/{filename}`
+   - Example: `/api/network/merge-preview/combined_df.csv`
+
+### Important deployment note
+- The live app currently registers only the network router in `app/main.py`.
+- The `what-if`, `ML`, telemetry, and mock-data routes exist in source files, but they are not guaranteed to appear in Swagger on the deployed Render host unless they are explicitly included in the running app.
+
 ## Render Deployment Instructions
 
 ### 1. Create Render Web Service

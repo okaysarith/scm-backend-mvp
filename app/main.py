@@ -315,6 +315,7 @@ app.add_middleware(
 @app.get("/health")
 def health_check():
     """Health check endpoint with CSV loading status"""
+    global csv_ready, csv_download_progress
     headers = {}
     message = "Ready"
     
@@ -381,10 +382,7 @@ async def root():
         }
     }
 
-@app.get("/health")
-def health_check():
-    """Kubernetes/Docker health check"""
-    return {"status": "healthy"}
+# NOTE: Health endpoint already defined above at line 315
 
 # ============================================================================
 # Health Check Endpoint

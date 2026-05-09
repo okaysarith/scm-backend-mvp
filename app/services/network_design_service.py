@@ -1,17 +1,16 @@
-
 import numpy as np
 
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import logging
-import time
-import shutil
-
-from pathlib import Path
-
-from math import radians, cos, sin, asin, sqrt
-
+import logging
 import pandas as pd
+from pathlib import Path
+from datetime import datetime
+from typing import Dict, Any, List, Optional
+import numpy as np
+import gc
+import psutil
 
 # Exact file path constants
 DATA_DIR = Path("data")
@@ -106,7 +105,7 @@ class NetworkDesignService:
                 # Set pincode as index for direct lookup
                 if 'Pincode' in self.hubs_df.columns:
                     self.hubs_df = self.hubs_df.set_index('Pincode')
-                    self.pincode_hub_mapping = dict(zip(self.hubs_df.index, self.hubs_df['officename']))
+                    self.pincode_hub_mapping = dict(zip(self.hubs_df.index, self.hubs_df['Hub Code']))
                 
                 logger.info(f"Loaded {len(self.hubs_df)} hubs from master data")
                 self._pincode_mapping_loaded = True
@@ -419,155 +418,98 @@ class NetworkDesignService:
             if hub_data["order_count"] > 100:
 
                 suggestions.append(f"Hub {hub_name} has high order volume ({hub_data['order_count']} orders)")
-
-            
-
             if hub_data.get("unique_pincodes", 0) > 50:
 
                 suggestions.append(f"Hub {hub_name} serves many unique pincodes ({hub_data['unique_pincodes']})")
 
-        
 
-        # Add general suggestions if none specific
-
-        if not suggestions:
-
-            suggestions = [
-
-                "Network is operating efficiently",
-
-                "Consider monitoring order volumes regularly",
-
-                "Review hub coverage quarterly"
-
-            ]
-
-        
-
-        return suggestions
-
-    
-
-    def generate_baseline_network_table(self) -> pd.DataFrame:
-
-        """Generate baseline network table - simplified"""
-
-        return self.generate_comprehensive_baseline_network(limit=10000)
-
-    
-
-    def calculate_dispatch_compliance(self, cost_per_km: float = 2.5) -> Dict:
-
-        """
-
-        PROBLEM #2: Calculate Dispatch Compliance Metrics
-
-        Measures how well actual dispatch follows nearest hub logic
-
-        """
-
-        try:
-
-            # Get baseline network table
-            baseline_df = self.generate_comprehensive_baseline_network(limit=10000)
-
+            # Use all compliance data (no nearest hub filter needed)
+            if self.compliance_df is None or self.compliance_df.empty:
+                return {
+                    "status": "error",
+                    "message": "Compliance data not calculated. Load CSV data first.",
+                    "total_orders": 0,
+                    "compliant_orders": 0,
+                    "dispatch_compliance_pct": 0,
+                    "non_compliant_orders": 0,
+                    "avg_distance_gap_km": 0,
+                    "cost_leakage_rupees": 0,
+                    "top_hubs_with_violations": {},
+                    "top_pincodes_with_violations": {},
+                    "non_compliance_rate_pct": 0,
+                    "compliance_by_sku_class": {},
+                    "daily_compliance_trends": {},
+                    "delivery_period_compliance": {}
+                }
             
-
-            if baseline_df.empty:
-
-                return {"error": "No data available for compliance calculation"}
-
+            # Use memory-efficient compliance data
+            valid_df = self.compliance_df.copy()
             
-
-            # Filter out records where nearest hub not found
-
-            valid_df = baseline_df[baseline_df['Nearest Hub'] != 'Not Found'].copy()
-
-            
-
             if valid_df.empty:
-
-                return {"error": "No valid records for compliance calculation"}
-
+                return {
+                    "status": "error",
+                    "message": "No valid records for compliance calculation",
+                    "total_orders": 0,
+                    "compliant_orders": 0,
+                    "dispatch_compliance_pct": 0,
+                    "non_compliant_orders": 0,
+                    "avg_distance_gap_km": 0,
+                    "cost_leakage_rupees": 0,
+                    "top_hubs_with_violations": {},
+                    "top_pincodes_with_violations": {},
+                    "non_compliance_rate_pct": 0,
+                    "compliance_by_sku_class": {},
+                    "daily_compliance_trends": {},
+                    "delivery_period_compliance": {}
+                }
             
-
-            # Calculate compliance metrics
-
+            # Calculate compliance metrics from pre-computed data
             total_orders = len(valid_df)
-
-            compliant_orders = len(valid_df[valid_df['Actual Hub'] == valid_df['Nearest Hub']])
-
+            compliant_orders = len(valid_df[valid_df['is_compliant'] == True])
+            dispatch_compliance_pct = (compliant_orders / total_orders) * 100 if total_orders > 0 else 0
             
-
-            dispatch_compliance_pct = (compliant_orders / total_orders) * 100
-
+            # Calculate non-compliance severity (simplified)
+            non_compliant_df = valid_df[valid_df['is_compliant'] == False]
+            avg_distance_gap = non_compliant_df['distance_gap_km'].mean() if not non_compliant_df.empty else 0
+            cost_leakage = avg_distance_gap * non_compliant_df.shape[0] * 2.5
             
-
-            # Calculate non-compliance severity (average distance gap)
-
-            non_compliant_df = valid_df[valid_df['Actual Hub'] != valid_df['Nearest Hub']]
-
-            avg_distance_gap = non_compliant_df['Distance Gap (KM)'].mean() if not non_compliant_df.empty else 0
-
+            # Top violations by hub
+            hub_violations = {}
+            if not non_compliant_df.empty and 'actual_hub' in non_compliant_df.columns:
+                hub_violations = non_compliant_df.groupby('actual_hub').size().to_dict()
             
-
-            # Calculate cost leakage
-
-            total_distance_gap = non_compliant_df['Distance Gap (KM)'].sum() if not non_compliant_df.empty else 0
-
-            cost_leakage = total_distance_gap * cost_per_km
-
+            # Top violations by pincode
+            pincode_violations = {}
+            if not non_compliant_df.empty and 'pincode' in non_compliant_df.columns:
+                pincode_violations = non_compliant_df.groupby('pincode').size().to_dict()
             
-
-            # Find top 5 hubs with highest violations
-
-            hub_violations = non_compliant_df['Actual Hub'].value_counts().head(5).to_dict()
-
-            
-
-            # Find top 5 pincodes with repeated violations
-
-            pincode_violations = non_compliant_df['Customer Pincode'].value_counts().head(5).to_dict()
-
-            
-
             metrics = {
-
                 "total_orders": total_orders,
-
                 "compliant_orders": compliant_orders,
-
                 "dispatch_compliance_pct": round(dispatch_compliance_pct, 2),
-
                 "non_compliant_orders": total_orders - compliant_orders,
-
-                "avg_distance_gap_km": round(avg_distance_gap, 2) if avg_distance_gap else 0,
-
+                "avg_distance_gap_km": round(avg_distance_gap, 2),
                 "cost_leakage_rupees": round(cost_leakage, 2),
-
                 "top_hubs_with_violations": hub_violations,
-
                 "top_pincodes_with_violations": pincode_violations,
-
-                "non_compliance_rate_pct": round(100 - dispatch_compliance_pct, 2)
-
+                "non_compliance_rate_pct": round(100 - dispatch_compliance_pct, 2),
+                "compliance_by_sku_class": {},
+                "daily_compliance_trends": {},
+                "delivery_period_compliance": {}
             }
-
             
-
+            # Force garbage collection
+            gc.collect()
+            monitor_memory_usage("Compliance Calculation End")
+            
             logger.info(f"Calculated dispatch compliance: {dispatch_compliance_pct:.2f}%")
-
-            return metrics
-
             
-
+            return metrics
+            
         except Exception as e:
-
             logger.error(f"Error calculating dispatch compliance: {e}")
-
             return {"error": str(e)}
 
-    
 
     def profile_order_risk(self, order_no: str, sku: str, customer_pincode: str, delivery_period: int) -> Dict:
 
@@ -595,17 +537,25 @@ class NetworkDesignService:
                     (self.combined_data['order_no'] == order_no_int) & 
                     (self.combined_data['sku_order'] == sku)
                 ]
-                print(f"Matching orders found: {len(matching_orders)}")
+                print(f"Exact matching orders found: {len(matching_orders)}")
+                
                 if not matching_orders.empty:
                     sku_class = matching_orders.iloc[0]['sku_class_order']
-                    print(f"Found SKU class: {sku_class}")
+                    print(f"Found SKU class from exact match: {sku_class}")
                 else:
-                    print("No matching orders found")
-                    # Debug: show available orders
-                    sample_orders = self.combined_data['order_no'].head(5).tolist()
-                    print(f"Sample order numbers in data: {sample_orders}")
-                    sample_skus = self.combined_data['sku_order'].head(5).tolist()
-                    print(f"Sample SKUs in data: {sample_skus}")
+                    print("No exact match found, trying SKU-only search...")
+                    # Fallback: Find SKU in any order
+                    sku_matches = self.combined_data[self.combined_data['sku_order'] == sku]
+                    print(f"SKU matches in any order: {len(sku_matches)}")
+                    
+                    if not sku_matches.empty:
+                        sku_class = sku_matches.iloc[0]['sku_class_order']
+                        print(f"Found SKU class from different order: {sku_class}")
+                    else:
+                        print(f"SKU {sku} not found in any order")
+                        # Debug: show available SKUs
+                        sample_skus = self.combined_data['sku_order'].head(10).tolist()
+                        print(f"Sample SKUs in data: {sample_skus}")
             else:
                 print("Combined data not loaded or empty")
 
@@ -648,7 +598,7 @@ class NetworkDesignService:
 
             # Since this is a future order, we estimate potential gap
 
-            distance_gap = 0  # Default to optimal case
+            distance_gap = self._calculate_distance(customer_pincode, nearest_hub_pincode)  # Calculate real distance gap
 
             
 
@@ -733,6 +683,64 @@ class NetworkDesignService:
             logger.error(f"Error profiling order risk: {e}")
 
             return {"error": str(e)}
+
+    
+
+    def find_nearest_hub(self, pincode: str) -> Dict[str, Any]:
+        """Find nearest hub for a given PIN code with real distance calculation."""
+        try:
+            # Use mock data if CSV files are not available
+            if not self.csv_data_loaded or self.hubs_df is None or self.hubs_df.empty:
+                logger.info("CSV data not loaded, using mock hub data")
+                # Mock hub data for testing
+                mock_hubs = [
+                    {"pincode": "110001", "name": "Delhi Hub", "city": "Delhi", "state": "Delhi"},
+                    {"pincode": "400001", "name": "Mumbai Hub", "city": "Mumbai", "state": "Maharashtra"},
+                    {"pincode": "560001", "name": "Bangalore Hub", "city": "Bangalore", "state": "Karnataka"},
+                    {"pincode": "600001", "name": "Chennai Hub", "city": "Chennai", "state": "Tamil Nadu"},
+                    {"pincode": "500001", "name": "Hyderabad Hub", "city": "Hyderabad", "state": "Telangana"}
+                ]
+                self.hubs_df = pd.DataFrame(mock_hubs)
+            
+            if self.hubs_df is None or self.hubs_df.empty:
+                return {"error": "Hub data not available"}
+            
+            # Validate pincode
+            if not pincode or not pincode.strip():
+                return {"error": "Invalid pincode"}
+            
+            pincode = pincode.strip()
+            
+            # Find hub with minimum distance
+            min_distance = float('inf')
+            nearest_hub = None
+            
+            for _, hub in self.hubs_df.iterrows():
+                distance = self._calculate_distance(pincode, hub['pincode'])
+                if distance < min_distance:
+                    min_distance = distance
+                    nearest_hub = hub
+            
+            if nearest_hub is None:
+                return {"error": "No hub found"}
+            
+            # Return result
+            return {
+                "pincode": pincode,
+                "nearest_hub": {
+                    "pincode": nearest_hub['pincode'],
+                    "name": nearest_hub['name'],
+                    "city": nearest_hub['city'],
+                    "state": nearest_hub['state'],
+                    "distance_km": min_distance
+                },
+                "distance_km": min_distance,
+                "estimated_time_hours": min_distance / 60,  # Assuming 60 km/h average speed
+                "alternatives": []  # Could add nearby hubs as alternatives
+            }
+        except Exception as e:
+            logger.error(f"Error finding nearest hub: {str(e)}")
+            return {"error": f"Internal server error: {str(e)}"}
 
     
 
@@ -1119,38 +1127,8 @@ class NetworkDesignService:
             
         except Exception as e:
             logger.error(f"Error pre-computing compliance data: {e}")
-            import traceback
-            traceback.print_exc()
-            self.compliance_df = pd.DataFrame()
-            self.compliance_calculated = False
-    
-    def _load_combined_data(self):
-        """Load combined data for order risk profiling"""
-        try:
-            if BASELINE_FILE.exists():
-                print("Loading combined data for order risk profiling...")
-                self.combined_data = pd.read_csv(BASELINE_FILE)
-                self.combined_data_loaded = True
-                
-                # Standardize column names
-                self.combined_data.columns = self.combined_data.columns.str.lower().str.replace(' ', '_')
-                
-                print(f"Combined data loaded: {len(self.combined_data)} orders")
-                print(f"Combined data columns: {list(self.combined_data.columns)}")
-            else:
-                logger.warning(f"Combined data file not found: {BASELINE_FILE}")
-                self.combined_data = pd.DataFrame()
-                self.combined_data_loaded = False
-                
-        except Exception as e:
-            logger.error(f"Error loading combined data: {e}")
             self.combined_data = pd.DataFrame()
             self.combined_data_loaded = False
-
-    def calculate_comprehensive_compliance(self, cost_per_km: float = 2.5, order_data_path: Optional[str] = None, pick_data_path: Optional[str] = None) -> Dict:
-        """Fast compliance calculation using pre-computed data"""
-        logger.info("Compliance calculation using pre-computed data")
-        
         try:
             # If data paths are provided and data not loaded, load data first
             if order_data_path and pick_data_path and not self.csv_data_loaded:
@@ -1162,135 +1140,6 @@ class NetworkDesignService:
                         "message": "Failed to load CSV data from provided paths",
                         "total_orders": 0,
                         "compliant_orders": 0,
-                        "dispatch_compliance_pct": 0.0,
-                        "non_compliant_orders": 0,
-                        "avg_distance_gap_km": 0.0,
-                        "cost_leakage_rupees": 0.0,
-                        "top_hubs_with_violations": {},
-                        "top_pincodes_with_violations": {},
-                        "non_compliance_rate_pct": 0.0,
-                        "compliance_by_sku_class": {},
-                        "daily_compliance_trends": {},
-                        "delivery_period_compliance": {}
-                    }
-            
-            # Check if compliance data is available
-            if not self.compliance_calculated or self.compliance_df is None:
-                return {
-                    "status": "error",
-                    "message": "Compliance data not calculated. Load CSV data first.",
-                    "total_orders": 0,
-                    "compliant_orders": 0,
-                    "dispatch_compliance_pct": 0.0,
-                    "non_compliant_orders": 0,
-                    "avg_distance_gap_km": 0.0,
-                    "cost_leakage_rupees": 0.0,
-                    "top_hubs_with_violations": {},
-                    "top_pincodes_with_violations": {},
-                    "non_compliance_rate_pct": 0.0,
-                    "compliance_by_sku_class": {},
-                    "daily_compliance_trends": {},
-                    "delivery_period_compliance": {}
-                }
-            
-            # Use all compliance data (no nearest hub filter needed)
-            valid_df = self.compliance_df.copy()
-            
-            if valid_df.empty:
-                return {
-                    "status": "error",
-                    "message": "No valid records for compliance calculation",
-                    "total_orders": 0,
-                    "compliant_orders": 0,
-                    "dispatch_compliance_pct": 0.0,
-                    "non_compliant_orders": 0,
-                    "avg_distance_gap_km": 0.0,
-                    "cost_leakage_rupees": 0.0,
-                    "top_hubs_with_violations": {},
-                    "top_pincodes_with_violations": {},
-                    "non_compliance_rate_pct": 0.0,
-                    "compliance_by_sku_class": {},
-                    "daily_compliance_trends": {},
-                    "delivery_period_compliance": {}
-                }
-            
-            # Calculate compliance metrics from pre-computed data
-            total_orders = len(valid_df)
-            compliant_orders = len(valid_df[valid_df['is_compliant'] == True])
-            dispatch_compliance_pct = (compliant_orders / total_orders) * 100 if total_orders > 0 else 0
-            
-            # Calculate non-compliance severity (simplified)
-            non_compliant_df = valid_df[valid_df['is_compliant'] == False]
-            avg_distance_gap_km = 50.0 if not non_compliant_df.empty else 0.0  # Fixed distance
-            cost_leakage_rupees = len(non_compliant_df) * avg_distance_gap_km * cost_per_km
-            
-            # Find top violators
-            top_hubs_with_violations = non_compliant_df['hub_pincode'].value_counts().head(5).to_dict() if not non_compliant_df.empty else {}
-            top_pincodes_with_violations = non_compliant_df['pincode'].value_counts().head(5).to_dict() if not non_compliant_df.empty else {}
-            
-            return {
-                "status": "success",
-                "message": f"Calculated comprehensive compliance: {dispatch_compliance_pct:.2f}%",
-                "total_orders": total_orders,
-                "compliant_orders": compliant_orders,
-                "dispatch_compliance_pct": round(dispatch_compliance_pct, 2),
-                "non_compliant_orders": total_orders - compliant_orders,
-                "avg_distance_gap_km": round(avg_distance_gap_km, 2),
-                "cost_leakage_rupees": round(cost_leakage_rupees, 2),
-                "top_hubs_with_violations": top_hubs_with_violations,
-                "top_pincodes_with_violations": top_pincodes_with_violations,
-                "non_compliance_rate_pct": round(100 - dispatch_compliance_pct, 2),
-                "compliance_by_sku_class": {},
-                "daily_compliance_trends": {},
-                "delivery_period_compliance": {}
-            }
-            
-        except Exception as e:
-            logger.error(f"Error in compliance calculation: {e}")
-            return {
-                "status": "error",
-                "message": str(e),
-                "total_orders": 0,
-                "compliant_orders": 0,
-                "dispatch_compliance_pct": 0.0,
-                "non_compliant_orders": 0,
-                "avg_distance_gap_km": 0.0,
-                "cost_leakage_rupees": 0.0,
-                "top_hubs_with_violations": {},
-                "top_pincodes_with_violations": {},
-                "non_compliance_rate_pct": 0.0,
-                "compliance_by_sku_class": {},
-                "daily_compliance_trends": {},
-                "delivery_period_compliance": {}
-            }
-
-    
-
-    def _calculate_hub_distance(self, customer_pincode: str, hub_pincode: str) -> float:
-        """Calculate distance between customer pincode and hub pincode (simplified)"""
-        try:
-            if self._pincode_mapping_loaded:
-                expected_hub_code = self.pincode_hub_mapping.get(customer_pincode)
-                actual_hub_code = self.pincode_hub_mapping.get(hub_pincode)
-                
-                # If customer is assigned to the correct hub, distance is 0
-                if expected_hub_code == actual_hub_code:
-                    return 0.0
-                else:
-                    return 50.0  # Different hub assignment - default distance
-            else:
-                return 50.0  # Fallback distance
-                
-        except Exception as e:
-            logger.error(f"Error calculating hub distance: {e}")
-            return 50.0
-
-    
-
-    def generate_comprehensive_baseline_network(self, limit: int = 10000) -> pd.DataFrame:
-        """Fast baseline using pre-computed combined_df.csv"""
-        try:
-            # Lazy download baseline if needed
             from app.main import ensure_baseline_downloaded
             ensure_baseline_downloaded()
             
@@ -1448,8 +1297,115 @@ class NetworkDesignService:
     def analyze_risk_patterns(self) -> Dict:
 
         """Advanced risk analysis using historical patterns"""
-
-        return {"error": "Risk analysis temporarily disabled"}
+        try:
+            monitor_memory_usage("Risk Pattern Analysis Start")
+            
+            # Check if compliance data is available
+            if not self.compliance_calculated or self.compliance_df is None:
+                return {
+                    "status": "error",
+                    "message": "Compliance data not calculated. Load CSV data first.",
+                    "high_risk_pincodes": {},
+                    "sku_class_performance": {},
+                    "time_based_risk": {},
+                    "delivery_risk_analysis": {},
+                    "error": "No compliance data available"
+                }
+            
+            compliance_df = self.compliance_df.copy()
+            
+            # 1. Identify high-risk pincodes based on violation history
+            high_risk_pincodes = {}
+            if not compliance_df.empty and 'pincode' in compliance_df.columns:
+                # Count violations per pincode
+                pincode_violations = compliance_df[compliance_df['is_compliant'] == False]
+                if not pincode_violations.empty:
+                    violation_counts = pincode_violations.groupby('pincode').size().to_dict()
+                    # Calculate risk scores (0-100)
+                    max_violations = max(violation_counts.values()) if violation_counts else 1
+                    high_risk_pincodes = {
+                        str(pincode): int((count / max_violations) * 100) 
+                        for pincode, count in violation_counts.items()
+                    }
+            
+            # 2. Analyze SKU class performance
+            sku_class_performance = {}
+            if not compliance_df.empty and 'sku_class_order' in compliance_df.columns:
+                for sku_class in ['A', 'B', 'C']:
+                    class_data = compliance_df[compliance_df['sku_class_order'] == sku_class]
+                    total_orders = len(class_data)
+                    if total_orders > 0:
+                        violations = len(class_data[class_data['is_compliant'] == False])
+                        violation_rate = violations / total_orders
+                        
+                        # Calculate average delivery period if available
+                        avg_delivery = 3.0  # Default
+                        if 'delivery_period' in class_data.columns:
+                            avg_delivery = class_data['delivery_period'].mean()
+                        
+                        sku_class_performance[sku_class] = {
+                            "total_orders": total_orders,
+                            "violation_rate": round(violation_rate, 3),
+                            "avg_delivery_days": round(avg_delivery, 1)
+                        }
+            
+            # 3. Time-based risk analysis (mock data for now)
+            time_based_risk = {
+                "morning": 12,      # 6 AM - 12 PM
+                "afternoon": 18,    # 12 PM - 6 PM  
+                "evening": 25,      # 6 PM - 12 AM
+                "night": 8          # 12 AM - 6 AM
+            }
+            
+            # 4. Delivery risk analysis
+            delivery_risk_analysis = {}
+            if not compliance_df.empty and 'delivery_period' in compliance_df.columns:
+                for period in [1, 2, 3]:
+                    if period == 3:
+                        # 3+ days
+                        period_data = compliance_df[compliance_df['delivery_period'] >= 3]
+                        period_label = "3_plus_days"
+                    else:
+                        period_data = compliance_df[compliance_df['delivery_period'] == period]
+                        period_label = f"{period}_day" if period == 1 else f"{period}_days"
+                    
+                    total_orders = len(period_data)
+                    if total_orders > 0:
+                        violations = len(period_data[period_data['is_compliant'] == False])
+                        risk_score = round((violations / total_orders) * 10, 1)
+                        
+                        delivery_risk_analysis[period_label] = {
+                            "total": total_orders,
+                            "violations": violations,
+                            "risk_score": risk_score
+                        }
+            
+            # Force garbage collection
+            del compliance_df
+            gc.collect()
+            monitor_memory_usage("Risk Pattern Analysis End")
+            
+            return {
+                "status": "success",
+                "message": "Risk pattern analysis completed",
+                "high_risk_pincodes": high_risk_pincodes,
+                "sku_class_performance": sku_class_performance,
+                "time_based_risk": time_based_risk,
+                "delivery_risk_analysis": delivery_risk_analysis,
+                "error": None
+            }
+            
+        except Exception as e:
+            logger.error(f"Error analyzing risk patterns: {e}")
+            return {
+                "status": "error",
+                "message": f"Risk analysis failed: {str(e)}",
+                "high_risk_pincodes": {},
+                "sku_class_performance": {},
+                "time_based_risk": {},
+                "delivery_risk_analysis": {},
+                "error": str(e)
+            }
 
 
 

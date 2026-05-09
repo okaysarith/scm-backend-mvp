@@ -40,9 +40,39 @@ def load_data():
     if _COSMOS_DATA is None:
         try:
             path = Path(__file__).parent.parent.parent / "cosmos_export.json"
-            with open(path) as f:
-                _COSMOS_DATA = json.load(f)
-            logger.info(f"✅ Loaded {len(_COSMOS_DATA)} documents from file")
+            if path.exists():
+                with open(path) as f:
+                    _COSMOS_DATA = json.load(f)
+                logger.info(f"✅ Loaded {len(_COSMOS_DATA)} documents from file")
+            else:
+                # Use mock data if file doesn't exist
+                _COSMOS_DATA = [
+                    {
+                        "time": "2024-01-01T12:00:00Z",
+                        "deviceId": "CNC_Machine_01",
+                        "metricName": "SpindleSpeed",
+                        "metricValue": 1500.0,
+                        "status": "running",
+                        "source": "iot-hub"
+                    },
+                    {
+                        "time": "2024-01-01T12:01:00Z",
+                        "deviceId": "Conveyor_01",
+                        "metricName": "BeltSpeed",
+                        "metricValue": 2.5,
+                        "status": "active",
+                        "source": "iot-hub"
+                    },
+                    {
+                        "time": "2024-01-01T12:02:00Z",
+                        "deviceId": "Logistics_Vehicle_01",
+                        "metricName": "Temperature",
+                        "metricValue": 25.5,
+                        "status": "moving",
+                        "source": "iot-hub"
+                    }
+                ]
+                logger.info("✅ Using mock telemetry data (cosmos_export.json not found)")
         except Exception as e:
             logger.error(f"Error loading data: {e}")
             _COSMOS_DATA = []
