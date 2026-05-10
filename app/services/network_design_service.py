@@ -1002,64 +1002,6 @@ class NetworkDesignService:
             logger.error(f"Error pre-computing compliance data: {e}")
             self.combined_data = pd.DataFrame()
             self.combined_data_loaded = False
-        try:
-            # If data paths are provided and data not loaded, load data first
-            if order_data_path and pick_data_path and not self.csv_data_loaded:
-                logger.info("Loading CSV data from provided paths...")
-                success = self.load_csv_data(order_data_path, pick_data_path)
-                if not success:
-                    return {
-                        "status": "error",
-                        "message": "Failed to load CSV data from provided paths",
-                        "total_orders": 0,
-                        "compliant_orders": 0,
-            from app.main import ensure_baseline_downloaded
-            ensure_baseline_downloaded()
-            
-            # Load pre-computed combined data
-            if not BASELINE_FILE.exists():
-                print("Combined data file not found for baseline generation")
-                logger.error("combined_df.csv not found")
-                return pd.DataFrame()
-            
-            # Load combined data (already merged order + pick data)
-            combined_df = pd.read_csv(BASELINE_FILE, nrows=limit)
-            
-            # Check if required columns exist
-            required_columns = ['order_no', 'pincode_order', 'hub_pincode']
-            missing_columns = [col for col in required_columns if col not in combined_df.columns]
-            if missing_columns:
-                logger.error(f"Missing required columns in combined_df.csv: {missing_columns}")
-                return pd.DataFrame()
-            
-            # Use existing compliance calculations if available
-            if 'is_compliant' in combined_df.columns:
-                baseline_df = combined_df[['order_no', 'pincode_order', 'hub_pincode', 'is_compliant']].copy()
-                baseline_df['distance_gap_km'] = combined_df.apply(
-                    lambda row: 50.0 if not row['is_compliant'] else 0.0, axis=1
-                )
-            else:
-                # Quick compliance check using pincode mapping
-                pincode_to_hub = {str(k): str(v) for k, v in self.pincode_hub_mapping.items()}
-                baseline_df = combined_df[['order_no', 'pincode_order', 'hub_pincode']].copy()
-                baseline_df['expected_hub'] = baseline_df['pincode_order'].map(pincode_to_hub)
-                baseline_df['is_compliant'] = baseline_df['hub_pincode'] == baseline_df['expected_hub']
-                baseline_df['distance_gap_km'] = baseline_df.apply(
-                    lambda row: 50.0 if not row['is_compliant'] else 0.0, axis=1
-                )
-            
-            # Rename columns for consistency
-            baseline_df = baseline_df.rename(columns={
-                'pincode_order': 'pincode',
-                'hub_pincode': 'actual_hub'
-            })
-            
-            logger.info(f"Generated baseline from combined_df.csv: {len(baseline_df)} orders")
-            return baseline_df
-            
-        except Exception as e:
-            logger.error(f"Error loading combined_df.csv: {e}")
-            return pd.DataFrame()
 
     
 
