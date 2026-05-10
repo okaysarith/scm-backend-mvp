@@ -1,16 +1,10 @@
 import numpy as np
-
 from typing import Any, Dict, List, Optional, Tuple
-
-import logging
 import logging
 import pandas as pd
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, List, Optional
-import numpy as np
 import gc
-import psutil
 
 # Exact file path constants
 DATA_DIR = Path("data")
@@ -1113,8 +1107,6 @@ class NetworkDesignService:
 
         """Advanced risk analysis using historical patterns"""
         try:
-            monitor_memory_usage("Risk Pattern Analysis Start")
-            
             # Check if compliance data is available
             if not self.compliance_calculated or self.compliance_df is None:
                 return {
@@ -1198,7 +1190,6 @@ class NetworkDesignService:
             # Force garbage collection
             del compliance_df
             gc.collect()
-            monitor_memory_usage("Risk Pattern Analysis End")
             
             return {
                 "status": "success",
