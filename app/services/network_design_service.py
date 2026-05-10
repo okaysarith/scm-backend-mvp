@@ -176,49 +176,6 @@ class NetworkDesignService:
 
     
 
-    def find_nearest_hub(self, pincode: str) -> Dict:
-        """Find nearest hub for a given pincode using master data (optimized)"""
-        try:
-            # Direct lookup using pincode mapping
-            if self._pincode_mapping_loaded and pincode in self.pincode_hub_mapping:
-                expected_hub_code = str(self.pincode_hub_mapping[pincode])
-                
-                # Direct lookup from hubs_df (no iteration needed)
-                if self.hubs_df is not None and expected_hub_code in self.hubs_df.index:
-                    hub = self.hubs_df.loc[expected_hub_code]
-                    
-                    return {
-                        "pincode": pincode,
-                        "nearest_hub": hub['officename'],
-                        "hub_pincode": str(expected_hub_code),
-                        "distance_km": 0.0,  # Direct assignment - no distance needed
-                        "pincode_coordinates": {"lat": hub['latitude'], "lon": hub['longitude']},
-                        "hub_coordinates": {"lat": hub['latitude'], "lon": hub['longitude']}
-                    }
-                else:
-                    print(f"DEBUG: Hub code {expected_hub_code} not found in hubs_df")
-            
-            # Fallback if no mapping found
-            if self.hubs_df is None or self.hubs_df.empty:
-                return {"error": "No hub data available"}
-            
-            # Return first available hub as fallback
-            first_hub = self.hubs_df.iloc[0]
-            return {
-                "pincode": pincode,
-                "nearest_hub": first_hub['officename'],
-                "hub_pincode": str(first_hub.name),
-                "distance_km": 50.0,  # Default distance
-                "pincode_coordinates": {"lat": first_hub['latitude'], "lon": first_hub['longitude']},
-                "hub_coordinates": {"lat": first_hub['latitude'], "lon": first_hub['longitude']}
-            }
-            
-        except Exception as e:
-            logger.error(f"Error finding nearest hub: {e}")
-            return {"error": str(e)}
-
-    
-
     def analyze_network_coverage(self, pincodes: List[str]) -> Dict:
 
         """Analyze network coverage for multiple pincodes"""
@@ -423,92 +380,8 @@ class NetworkDesignService:
                 suggestions.append(f"Hub {hub_name} serves many unique pincodes ({hub_data['unique_pincodes']})")
 
 
-            # Use all compliance data (no nearest hub filter needed)
-            if self.compliance_df is None or self.compliance_df.empty:
-                return {
-                    "status": "error",
-                    "message": "Compliance data not calculated. Load CSV data first.",
-                    "total_orders": 0,
-                    "compliant_orders": 0,
-                    "dispatch_compliance_pct": 0,
-                    "non_compliant_orders": 0,
-                    "avg_distance_gap_km": 0,
-                    "cost_leakage_rupees": 0,
-                    "top_hubs_with_violations": {},
-                    "top_pincodes_with_violations": {},
-                    "non_compliance_rate_pct": 0,
-                    "compliance_by_sku_class": {},
-                    "daily_compliance_trends": {},
-                    "delivery_period_compliance": {}
-                }
-            
-            # Use memory-efficient compliance data
-            valid_df = self.compliance_df.copy()
-            
-            if valid_df.empty:
-                return {
-                    "status": "error",
-                    "message": "No valid records for compliance calculation",
-                    "total_orders": 0,
-                    "compliant_orders": 0,
-                    "dispatch_compliance_pct": 0,
-                    "non_compliant_orders": 0,
-                    "avg_distance_gap_km": 0,
-                    "cost_leakage_rupees": 0,
-                    "top_hubs_with_violations": {},
-                    "top_pincodes_with_violations": {},
-                    "non_compliance_rate_pct": 0,
-                    "compliance_by_sku_class": {},
-                    "daily_compliance_trends": {},
-                    "delivery_period_compliance": {}
-                }
-            
-            # Calculate compliance metrics from pre-computed data
-            total_orders = len(valid_df)
-            compliant_orders = len(valid_df[valid_df['is_compliant'] == True])
-            dispatch_compliance_pct = (compliant_orders / total_orders) * 100 if total_orders > 0 else 0
-            
-            # Calculate non-compliance severity (simplified)
-            non_compliant_df = valid_df[valid_df['is_compliant'] == False]
-            avg_distance_gap = non_compliant_df['distance_gap_km'].mean() if not non_compliant_df.empty else 0
-            cost_leakage = avg_distance_gap * non_compliant_df.shape[0] * 2.5
-            
-            # Top violations by hub
-            hub_violations = {}
-            if not non_compliant_df.empty and 'actual_hub' in non_compliant_df.columns:
-                hub_violations = non_compliant_df.groupby('actual_hub').size().to_dict()
-            
-            # Top violations by pincode
-            pincode_violations = {}
-            if not non_compliant_df.empty and 'pincode' in non_compliant_df.columns:
-                pincode_violations = non_compliant_df.groupby('pincode').size().to_dict()
-            
-            metrics = {
-                "total_orders": total_orders,
-                "compliant_orders": compliant_orders,
-                "dispatch_compliance_pct": round(dispatch_compliance_pct, 2),
-                "non_compliant_orders": total_orders - compliant_orders,
-                "avg_distance_gap_km": round(avg_distance_gap, 2),
-                "cost_leakage_rupees": round(cost_leakage, 2),
-                "top_hubs_with_violations": hub_violations,
-                "top_pincodes_with_violations": pincode_violations,
-                "non_compliance_rate_pct": round(100 - dispatch_compliance_pct, 2),
-                "compliance_by_sku_class": {},
-                "daily_compliance_trends": {},
-                "delivery_period_compliance": {}
-            }
-            
-            # Force garbage collection
-            gc.collect()
-            monitor_memory_usage("Compliance Calculation End")
-            
-            logger.info(f"Calculated dispatch compliance: {dispatch_compliance_pct:.2f}%")
-            
-            return metrics
-            
-        except Exception as e:
-            logger.error(f"Error calculating dispatch compliance: {e}")
-            return {"error": str(e)}
+
+        return suggestions
 
 
     def profile_order_risk(self, order_no: str, sku: str, customer_pincode: str, delivery_period: int) -> Dict:
